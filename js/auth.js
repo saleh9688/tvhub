@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    بوابة الدخول — TV Hub (نظام الحسابات المتعددة)
 
    لا يُحمَّل أي محتوى قبل التحقّق. الآلية:
@@ -140,6 +140,30 @@ const TVHubAuth = (() => {
     if (!f || f._wired) return;
     f._wired = true;
 
+    /* زرّ إظهار كلمة المرور — يحوّل الحقل إلى نصّ عادي ليتأكّد المستخدم
+       مما كتبه فعلًا. هذا أشيع سبب لفشل الدخول: كتابة صحيحة في ظنّه. */
+    const eye = $('#gEye');
+    if (eye) {
+      eye.addEventListener('click', () => {
+        const p = $('#gPass');
+        const show = p.type === 'password';
+        p.type = show ? 'text' : 'password';
+        eye.classList.toggle('on', show);
+        eye.title = show ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور';
+        p.focus();
+      });
+    }
+
+    /* Caps Lock سبب شائع ثانٍ. ننبّه فورًا بدل انتظار محاولة فاشلة. */
+    const pw = $('#gPass');
+    if (pw) {
+      pw.addEventListener('keyup', ev => {
+        const on = typeof ev.getModifierState === 'function' && ev.getModifierState('CapsLock');
+        const err = $('#gErr');
+        if (on && err && !err.textContent) err.textContent = 'تنبيه: مفتاح Caps Lock مفعّل.';
+      });
+    }
+
     f.addEventListener('submit', async ev => {
       ev.preventDefault();
       const btn = $('#gGo');
@@ -174,6 +198,16 @@ const TVHubAuth = (() => {
     if (LOAD) return LOAD;
     LOAD = new Promise(async resolve => {
       wireForm();
+
+      /* crypto.subtle متاح فقط في «سياق آمن»: HTTPS أو localhost.
+         لو فُتح الموقع عبر عنوان شبكة محلية بـ http (مثل 192.168.x.x:8731)
+         يفشل الدخول بلا سبب ظاهر — فنقولها صريحة بدل رسالة مضلّلة. */
+      if (!crypto.subtle) {
+        showGate('التشفير لا يعمل على هذا الاتصال. افتح الموقع عبر HTTPS أو localhost.');
+        const go = $('#gGo');
+        if (go) { go.disabled = true; go.textContent = 'الاتصال غير آمن'; }
+        return;
+      }
 
       // 1) جلسة محفوظة؟
       const s = restoreSession();
