@@ -1,0 +1,98 @@
+/* ============================================================
+   لوحة إدارة الحسابات — أنماط
+   ============================================================ */
+#btnAccounts.on,
+.chip.on { background: var(--ok, #16a34a); color: #04120a; }
+
+#admin {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(4, 7, 12, .82);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 24px 16px; overflow: auto;
+}
+#admin.hidden { display: none; }
+
+.admCard {
+  width: min(680px, 100%);
+  background: var(--card, #111721);
+  border: 1px solid var(--line, #1e2733);
+  border-radius: 16px;
+  padding: 18px 18px 20px;
+}
+
+.admHead {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px;
+}
+.admHead h2 { margin: 0; font-size: 17px; flex: 1; }
+.admCount { font-size: 12px; opacity: .65; }
+
+.admNote {
+  min-height: 18px; font-size: 13px; margin: 8px 0 12px;
+  color: #7dd3a0;
+}
+.admNote.bad { color: #f87171; }
+
+.admDirty {
+  display: inline-block; font-size: 12px; padding: 2px 8px;
+  border-radius: 999px; background: #7c5c00; color: #ffe08a;
+}
+.admDirty.hidden { display: none; }
+
+.admList { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+
+.admRow {
+  display: flex; align-items: center; gap: 10px;
+  background: #0c121b; border: 1px solid var(--line, #1e2733);
+  border-radius: 10px; padding: 9px 12px;
+}
+.admWho { flex: 1; min-width: 0; }
+.admName { font-size: 14px; }
+.admSub { font-size: 12px; opacity: .6; margin-top: 2px; }
+.admTag {
+  font-size: 11px; padding: 1px 6px; border-radius: 999px;
+  background: #1d4ed8; color: #fff; margin-inline-start: 4px;
+}
+.admX {
+  background: none; border: 1px solid #3a1c1c; color: #f0837f;
+  border-radius: 8px; width: 28px; height: 28px; cursor: pointer;
+  font-size: 13px; line-height: 1;
+}
+.admX:hover { background: #2a1414; }
+
+.admForm {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  border-top: 1px solid var(--line, #1e2733); padding-top: 14px;
+}
+.admForm input[type=text],
+.admForm input[type=password] {
+  background: #0b1017; border: 1px solid var(--line, #1e2733);
+  border-radius: 9px; padding: 9px 11px; color: inherit;
+  font: inherit; font-size: 13px; width: 100%;
+}
+.admForm input:focus { outline: none; border-color: #2563eb; }
+.admForm .admWide { grid-column: 1 / -1; }
+.admChk {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;
+  font-size: 13px; opacity: .85;
+}
+.admBtns { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+
+.admPub {
+  border-top: 1px solid var(--line, #1e2733);
+  margin-top: 16px; padding-top: 14px;
+}
+.admPub .admLbl { font-size: 13px; margin-bottom: 8px; opacity: .8; }
+.admPub input {
+  background: #0b1017; border: 1px solid var(--line, #1e2733);
+  border-radius: 9px; padding: 9px 11px; color: inherit;
+  font: inherit; font-size: 13px; width: 100%; margin-bottom: 8px;
+}
+.admWarn {
+  font-size: 11.5px; line-height: 1.7; opacity: .6; margin-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .admForm { grid-template-columns: 1fr; }
+}
