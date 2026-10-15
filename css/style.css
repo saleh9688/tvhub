@@ -185,3 +185,118 @@ button{font-family:inherit}
   .pTop{padding:8px 10px;gap:6px}
   .chip{padding:6px 10px;font-size:11.5px}
 }
+
+/* ============================================================
+   بوابة الدخول
+   تُغطّي الشاشة كلها، ولا يبقى خلفها أي محتوى لأن التطبيق لا يحمّل
+   أي بيانات قبل نجاح الدخول.
+   ============================================================ */
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: radial-gradient(1200px 600px at 50% -10%, #16223c 0%, #0b1020 60%, #070b16 100%);
+}
+
+.gateCard {
+  width: 100%;
+  max-width: 380px;
+  padding: 26px 24px 20px;
+  border-radius: 18px;
+  background: #101728;
+  border: 1px solid #1e2a45;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.gateLogo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-size: 24px;
+}
+
+.gateHint {
+  text-align: center;
+  color: #8fa2c4;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.gateField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gateField > span {
+  font-size: 12.5px;
+  color: #8fa2c4;
+}
+
+.gateField input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 11px;
+  border: 1px solid #26344f;
+  background: #0c1322;
+  color: #e8eefb;
+  font: inherit;
+  font-size: 15px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+  direction: ltr;
+  text-align: left;
+}
+
+.gateField input:focus {
+  border-color: #19c3a6;
+  box-shadow: 0 0 0 3px rgba(25, 195, 166, .16);
+}
+
+.gateErr {
+  min-height: 18px;
+  color: #ff7a7a;
+  font-size: 13px;
+  text-align: center;
+}
+
+.gateBtn {
+  padding: 13px 16px;
+  border: 0;
+  border-radius: 11px;
+  background: #19c3a6;
+  color: #04231d;
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter .15s, opacity .15s;
+}
+
+.gateBtn:hover { filter: brightness(1.07); }
+.gateBtn:disabled { opacity: .6; cursor: default; }
+
+.gateNote {
+  text-align: center;
+  color: #5f7291;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* إخفاء الواجهة كاملة قبل الدخول — لا وميض، ولا شيء قابل للاستعراض */
+body.gated #top,
+body.gated #tabs,
+body.gated #subbar,
+body.gated #list,
+body.gated #status {
+  visibility: hidden;
+}
