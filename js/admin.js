@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    لوحة إدارة الحسابات — TV Hub
 
    تظهر للمشرفين فقط. تُضيف/تحذف الحسابات وتغيّر كلمات المرور،
@@ -13,6 +13,7 @@
 const TVHubAdmin = (() => {
   const LS_TOKEN = 'tvhub.gh.token';
   const LS_REPO = 'tvhub.gh.repo';
+  const LS_PENDING = 'tvhub.users.pending';
   const AAD_USER = new TextEncoder().encode('tvhub-user-v2');
   const AAD_LABEL = new TextEncoder().encode('tvhub-label-v2');
   const ITER = 300000;
@@ -140,6 +141,37 @@ const TVHubAdmin = (() => {
     n.className = 'admNote' + (bad ? ' bad' : '');
   }
 
+  /* ---------- حفظ التغييرات غير المنشورة ----------
+
+     بلا هذا، تبقى أي إضافة في ذاكرة الصفحة وحدها فتُفقد بمجرّد إعادة
+     التحميل أو إغلاق التبويب. فيظنّ المستخدم أنه أضاف الحساب، ثم يتعجّب
+     من رفض الدخول — وهذا بالضبط ما حدث فعلًا. نحفظها محليًا حتى تُنشر. */
+  function savePending() {
+    try { localStorage.setItem(LS_PENDING, JSON.stringify(doc)); } catch (_) {}
+  }
+
+  function markDirty() {
+    dirty = true;
+    savePending();
+    $('#admDirty').classList.remove('hidden');
+    paintBadge();
+  }
+
+  function clearPending() {
+    dirty = false;
+    try { localStorage.removeItem(LS_PENDING); } catch (_) {}
+    $('#admDirty').classList.add('hidden');
+    paintBadge();
+  }
+
+  /* علامة على زرّ «الحسابات» حتى لا تُنسى تغييرات غير منشورة */
+  function paintBadge() {
+    const b = $('#btnAccounts');
+    if (!b) return;
+    b.textContent = dirty ? 'الحسابات ●' : 'الحسابات';
+    b.title = dirty ? 'لديك تغييرات غير منشورة' : '';
+  }
+
   /* ---------- التشغيل ---------- */
   async function addUser() {
     const user = $('#admUser').value.trim();
@@ -155,7 +187,7 @@ const TVHubAdmin = (() => {
 
     note('جارٍ التغليف (PBKDF2 ×300000)…');
     doc.users.push(await buildEntry(user, pass, label || user, admin));
-    dirty = true;
+    markDirty();
 
     $('#admUser').value = ''; $('#admLabel').value = ''; $('#admPass').value = '';
     $('#admAdmin').checked = false;
@@ -173,7 +205,7 @@ const TVHubAdmin = (() => {
     const lb = await labelOf(e);
     if (!confirm(`حذف «${lb}»؟`)) return;
     doc.users = doc.users.filter(x => x.u !== id);
-    dirty = true;
+    markDirty();
     note(`✓ حُذف «${lb}».`);
     renderList();
   }
@@ -181,7 +213,7 @@ const TVHubAdmin = (() => {
   async function doPublish() {
     const token = ($('#admToken').value || '').trim();
     const repo = ($('#admRepo').value || '').trim();
-    if (!token) return note('الصق توكن GitHub أولًا (أو نزّل الملف وارفعه يدويًا).', true);
+    if (!token) return note('بلا توكن لا يمكن النشر التلقائي — استخدم «تنزيل users.json» وارفعه إلى data/users.json في المستودع.', true);
     if (!/^[^/]+\/[^/]+$/.test(repo)) return note('صيغة المستودع: المالك/الاسم', true);
 
     const btn = $('#admGo');
@@ -190,12 +222,20 @@ const TVHubAdmin = (() => {
       localStorage.setItem(LS_TOKEN, token);
       localStorage.setItem(LS_REPO, repo);
       const url = await publish(token, repo);
-      dirty = false;
-      $('#admDirty').classList.add('hidden');
+      clearPending();
       note('✓ نُشرت الحسابات على الموقع. ستُطبَّق على كل الأجهزة فورًا.');
       window.dispatchEvent(new Event('tvhub-admin-published'));
     } catch (e) {
-      note('فشل النشر: ' + e.message, true);
+      const m = String((e && e.message) || e);
+      if (/403/.test(m)) {
+        note('التوكن لا يملك صلاحية الكتابة على هذا المستودع. أنشئ توكنًا جديدًا '
+           + '(Fine-grained) بصلاحية Contents: Read and write. '
+           + 'حساباتك محفوظة ولم تُفقد — ويمكنك النشر بلا توكن بزرّ «تنزيل users.json».', true);
+      } else if (/401|Bad credentials/i.test(m)) {
+        note('التوكن غير صالح أو منتهٍ. أنشئ توكنًا جديدًا بصلاحية Contents: Read and write.', true);
+      } else {
+        note('فشل النشر: ' + m + ' — حساباتك محفوظة، ويمكنك النشر بلا توكن بزرّ «تنزيل users.json».', true);
+      }
     }
     btn.disabled = false;
   }
@@ -218,7 +258,10 @@ const TVHubAdmin = (() => {
     $('#admToken').value = t;
     $('#admRepo').value = r;
     renderList();
-    note('');
+    paintBadge();
+    note(dirty
+      ? '⚠ لديك تغييرات غير منشورة — اضغط «نشر التغييرات» لتُطبَّق على كل الأجهزة.'
+      : '', dirty);
   }
   function close() { $('#admin').classList.add('hidden'); }
 
@@ -250,7 +293,19 @@ const TVHubAdmin = (() => {
 
     const b = $('#btnAccounts');
     if (b) b.classList.remove('hidden');
+
+    /* استرجاع تغييرات لم تُنشر بعد — نجت من إعادة تحميل الصفحة */
+    try {
+      const pend = localStorage.getItem(LS_PENDING);
+      if (pend) {
+        const p = JSON.parse(pend);
+        if (p && Array.isArray(p.users) && p.users.length) { doc = p; dirty = true; }
+      }
+    } catch (_) {}
+
     wire();
+    paintBadge();
+    if (dirty) note('⚠ لديك تغييرات غير منشورة من قبل — اضغط «نشر التغييرات».', true);
   }
 
   // نلتقط لحظة نجاح الدخول (تعمل أيضًا مع الجلسة المحفوظة)
