@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TV Hub — نسخة الويب</title>
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/admin.css">
 </head>
 <body>
 
@@ -18,6 +19,7 @@
   <div class="tools">
     <button id="btnWorking" class="chip" title="أظهر ما له مصدر يعمل فقط">يعمل فقط</button>
     <button id="btnScan" class="chip" title="افحص مصادر ما تراه أمامك الآن">افحص المعروض</button>
+    <button id="btnAccounts" class="chip hidden" title="إدارة الحسابات">الحسابات</button>
     <button id="btnLogout" class="chip hidden" title="إنهاء الجلسة">خروج</button>
   </div>
 </header>
@@ -71,9 +73,50 @@
   </form>
 </div>
 
+<!-- لوحة إدارة الحسابات — تظهر للمشرفين فقط -->
+<div id="admin" class="hidden">
+  <div class="admCard">
+    <div class="admHead">
+      <h2>إدارة الحسابات</h2>
+      <span class="admCount" id="admCount"></span>
+      <span class="admDirty hidden" id="admDirty">تغييرات غير منشورة</span>
+      <button id="admClose" class="chip">✕</button>
+    </div>
+
+    <div class="admList" id="admList"></div>
+    <div class="admNote" id="admNote"></div>
+
+    <form class="admForm" id="admForm" autocomplete="off">
+      <input id="admUser" type="text" placeholder="اسم الدخول (بالإنجليزية)" spellcheck="false" autocapitalize="none">
+      <input id="admLabel" type="text" placeholder="الاسم الظاهر (اختياري)">
+      <input id="admPass" class="admWide" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" autocomplete="new-password">
+      <label class="admChk"><input id="admAdmin" type="checkbox"> مشرف — يستطيع إدارة الحسابات</label>
+      <div class="admBtns">
+        <button class="chip on" type="submit">+ إضافة حساب</button>
+      </div>
+    </form>
+
+    <div class="admPub">
+      <div class="admLbl">النشر على الموقع</div>
+      <input id="admRepo" type="text" placeholder="المالك/المستودع" spellcheck="false">
+      <input id="admToken" type="password" placeholder="توكن GitHub — صلاحية Contents: Read and write (اختياري)">
+      <div class="admBtns">
+        <button class="chip on" id="admGo" type="button">نشر التغييرات</button>
+        <button class="chip" id="admDl" type="button">تنزيل users.json</button>
+      </div>
+      <div class="admWarn">
+        التوكن يُحفظ في هذا المتصفح وحده ولا يُرسل لأي جهة غير GitHub.
+        استخدم توكنًا مخصّصًا لهذا المستودع بصلاحية <b>Contents</b> فقط.
+        ولو ما عندك توكن: نزّل الملف وارفعه إلى <b>data/users.json</b> في المستودع.
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="vendor/hls.min.js"></script>
 <script src="vendor/dash.all.min.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/admin.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
