@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="utf-8">
@@ -64,7 +64,16 @@
     </label>
 
     <label class="gateField"><span>كلمة المرور</span>
-      <input id="gPass" type="password" autocomplete="current-password">
+      <div class="gatePassWrap">
+        <input id="gPass" type="password" autocomplete="current-password">
+        <button type="button" id="gEye" class="gateEye" aria-label="إظهار كلمة المرور" title="إظهار كلمة المرور">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
     </label>
 
     <div class="gateErr" id="gErr"></div>
