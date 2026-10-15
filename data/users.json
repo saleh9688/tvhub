@@ -1,0 +1,23 @@
+{
+ "v": 2,
+ "kdf": "PBKDF2-SHA256",
+ "iter": 300000,
+ "pepper": "a70a873a4d4b8e149c3c4a73fb4559ab",
+ "users": [
+  {
+   "u": "00c9e635e85426580636787571b631fd22ffd8a06c3969edb5e537e60227de7f",
+   "salt": "RlXttqYK9PJ/4+1do+ot4Q==",
+   "iter": 300000,
+   "iv": "UUtAlCL4fcJ2Ekw7",
+   "tag": "xWlC8aB+1F1751Tqa2m3Jg==",
+   "wk": "FlgE98Csq4sfV96yqhWXF4/yopVKQGasNHj1VeAbA38=",
+   "lb": {
+    "iv": "CeCg4FLUm1eLfykC",
+    "tag": "+gf15LJ1QmF4YgwxALQAzg==",
+    "ct": "yV1Uk5g="
+   },
+   "admin": true,
+   "created": "2026-10-15T12:21:28.094Z"
+  }
+ ]
+}
