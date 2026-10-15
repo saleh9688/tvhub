@@ -292,7 +292,27 @@ const ORD = { live: 0, soon: 1, unknown: 2, ended: 3 };
 /* ============================================================
    الإقلاع
    ============================================================ */
+/* ============================================================
+   مصدر البيانات الوحيد
+   عند قفل الموقع تُقرأ البيانات من الخزنة المفكوكة (TVHubAuth.load)
+   ولا يُطلب أي ملف JSON صريح — فلا يبقى محتوى يمكن الوصول إليه
+   بلا بيانات الدخول. ولو لم يكن الموقع مقفلًا نرجع للتحميل العادي.
+   ============================================================ */
+let DATA_PROMISE = null;
+function loadAll() {
+  if (!DATA_PROMISE) DATA_PROMISE = TVHubAuth.load();
+  return DATA_PROMISE;
+}
+
 async function loadJSON(p) {
+  const v = await loadAll();
+  const fromVault = {
+    'data/catalog.json': v.catalog,
+    'data/categories.json': v.categories,
+    'data/verified.json': v.verified,
+  }[p];
+  if (fromVault) return fromVault;
+
   const r = await fetch(p, { cache: 'no-store' });
   if (!r.ok) throw new Error(p + ' → ' + r.status);
   return r.json();
@@ -1017,6 +1037,12 @@ function hook() {
   });
 
   $('#btnScan').addEventListener('click', scanCurrent);
+
+  // زرّ الخروج يظهر فقط عندما يكون الموقع مقفلًا
+  if ($('#btnLogout')) {
+    $('#btnLogout').addEventListener('click', () => TVHubAuth.logout());
+    TVHubAuth.isLocked().then(l => { if (l) $('#btnLogout').classList.remove('hidden'); });
+  }
 
   $('#btnClose').addEventListener('click', closePlayer);
   $('#btnNext').addEventListener('click', () => {
