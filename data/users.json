@@ -18,6 +18,21 @@
    },
    "admin": true,
    "created": "2026-10-15T12:21:28.094Z"
+  },
+  {
+   "u": "2eee3bd5315114f3deadb99654a2054aec4f3b15b83f46cd75759e22716db1f7",
+   "salt": "kYnK8g67kKmYhS3NR0+tnA==",
+   "iter": 300000,
+   "iv": "Dhu8B4z0FV4YEyva",
+   "tag": "T8HG40unaCAcdUUXI98O6A==",
+   "wk": "5F2g+Nzn/V9qCSJo30/BRsgaHMSEmvSXYlg81r5zfyI=",
+   "lb": {
+    "iv": "gwrtQ9KJHp0/htUt",
+    "tag": "A4dbIEao9v5I7jROqYZfrg==",
+    "ct": "xBj5HAdEdg=="
+   },
+   "admin": false,
+   "created": "2026-10-15T13:28:47.833Z"
   }
  ]
 }
