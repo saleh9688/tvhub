@@ -1,17 +1,19 @@
-/* ============================================================
+﻿/* ============================================================
    لوحة إدارة الحسابات — أنماط
    ============================================================ */
 #btnAccounts.on,
 .chip.on { background: var(--ok, #16a34a); color: #04120a; }
 
-#admin {
+#admin,
+#settings {
   position: fixed; inset: 0; z-index: 60;
   background: rgba(4, 7, 12, .82);
   backdrop-filter: blur(3px);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 24px 16px; overflow: auto;
 }
-#admin.hidden { display: none; }
+#admin.hidden,
+#settings.hidden { display: none; }
 
 .admCard {
   width: min(680px, 100%);

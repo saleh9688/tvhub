@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="utf-8">
@@ -19,6 +19,7 @@
   <div class="tools">
     <button id="btnWorking" class="chip" title="أظهر ما له مصدر يعمل فقط">يعمل فقط</button>
     <button id="btnScan" class="chip" title="افحص مصادر ما تراه أمامك الآن">افحص المعروض</button>
+    <button id="btnSettings" class="chip" title="وسيط لتشغيل المصادر التي يمنعها المتصفح">الوسيط</button>
     <button id="btnAccounts" class="chip hidden" title="إدارة الحسابات">الحسابات</button>
     <button id="btnLogout" class="chip hidden" title="إنهاء الجلسة">خروج</button>
   </div>
@@ -122,12 +123,43 @@
   </div>
 </div>
 
+<div id="settings" class="hidden">
+  <div class="admCard">
+    <div class="admHead">
+      <h2>وسيط CORS</h2>
+      <div class="admCount" id="setState"></div>
+      <button class="chip" id="setClose" type="button">✕</button>
+    </div>
+    <div class="admNote">
+      المتصفح يمنع تشغيل أي مصدر لا يرسل ترويسة CORS — وهذه حال أغلب مضيفات HLS عندنا.
+      الوسيط يجلب الملف من خادم ثم يمرّره لك. اتركه فارغًا للاعتماد على الوسائط العامة.
+    </div>
+    <div class="admPub">
+      <div class="admLbl">عنوان الوسيط</div>
+      <input id="setProxy" type="text" placeholder="https://my-proxy.example.com/?url=" spellcheck="false">
+      <div class="admBtns">
+        <button class="chip on" id="setSave" type="button">حفظ</button>
+        <button class="chip" id="setClear" type="button">مسح</button>
+        <button class="chip" id="setTest" type="button">اختبار</button>
+      </div>
+      <div class="admWarn">
+        أي عنوان يمرّر الرابط بعد <b>?url=</b> يعمل. والأفضل <b>Cloudflare Worker</b> — مجاني
+        وبلا بطاقة، وملفه <b>cloudflare-worker.js</b> جاهز في المشروع: انشره ثم الصق هنا
+        <b>https://اسمك.workers.dev/?url=</b> واضغط <b>اختبار</b>.
+        <br>وإن شغّلت النسخة المحلية عبر <b>start.cmd</b> فالوسيط المحلي يُستعمل تلقائيًا —
+        ولتثبيته يدويًا: <b>http://localhost:8731/?url=</b>
+      </div>
+    </div>
+    <div class="admNote" id="setMsg"></div>
+  </div>
+</div>
+
 <script src="vendor/hls.min.js"></script>
 <script src="vendor/dash.all.min.js"></script>
 <!-- ?v= يتغيّر مع كل تعديل: GitHub Pages يخزّن الملفات عشر دقائق،
      فلولا هذا الرقم لظلّ المتصفح يشغّل نسخة قديمة ويكرّر الفشل. -->
-<script src="js/auth.js?v=5"></script>
-<script src="js/admin.js?v=5"></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/auth.js?v=7"></script>
+<script src="js/admin.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

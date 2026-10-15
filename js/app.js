@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    TV Hub — نسخة الويب
    واجهة عربية لكتالوج قنوات SportzX + مشغّل مدمج
    لا تتصل بأي خدمة خارجية: كل شيء محلي (كتالوج + مكتبتا تشغيل).
@@ -797,24 +797,42 @@ function openSource(i) {
   record(s);
 
   if (isDash && window.dashjs) {
-    if (ck) setNote('مصدر محمي — يتم فكّه محليًا بـ ClearKey بلا سيرفر ترخيص.');
     dash = dashjs.MediaPlayer().create();
-    dash.on('error', () => onEngineFail());
-    if (ck) {
-      try {
-        dash.setProtectionData({ 'org.w3.clearkey': { clearkeys: { [ck.kid]: ck.key } } });
-      } catch (e) {}
-    }
-    try {
-      dash.initialize(video, link, true);
+    dash.on('error', (e) => onEngineFail(e));
+    // كل طلب يمرّ عبر الوسيط إن كان مفعّلًا — القائمة والمقاطع معًا
+    try { dash.updateSettings({ requestModifier: { url: (u) => viaProxy(u) } }); } catch (e) {}
+
+    const startDash = (src) => {
+      if (ck) {
+        try { dash.setProtectionData({ 'org.w3.clearkey': { clearkeys: { [ck.kid]: ck.key } } }); } catch (e) {}
+      }
       dash.on(dashjs.MediaPlayer.events.PLAYBACK_PLAYING, () => hideOverlay());
       dash.on(dashjs.MediaPlayer.events.PLAYBACK_STARTED, () => hideOverlay());
-    } catch (e) { onEngineFail(); }
+      dash.initialize(video, src, true);
+    };
+
+    if (ck) {
+      // القنوات المحمية تحتاج القائمة معاد كتابتها — وإلا اختار dash.js Widevine
+      setNote('مصدر محمي — تجهيز فكّ ClearKey…');
+      rewriteMpdForClearKey(link, ck)
+        .then(startDash)
+        .catch((e) => onEngineFail({ details: 'manifestLoadError', message: e.message }));
+      return;
+    }
+    try { startDash(link); } catch (e) { onEngineFail(e); }
     return;
   }
 
   if (isHls && window.Hls && Hls.isSupported()) {
-    hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 20 });
+    hls = new Hls({
+      enableWorker: true, lowLatencyMode: false, maxBufferLength: 20,
+      // كل طلب يمرّ عبر الوسيط إن كان مفعّلًا — بما فيها المقاطع، لأن hls.js
+      // يحلّ الروابط النسبية مقابل رابط القائمة الأصلي لا رابط الوسيط.
+      xhrSetup: (xhr, u) => {
+        const p = viaProxy(u);
+        if (p !== u) { try { xhr.open('GET', p, true); } catch (e) {} }
+      },
+    });
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       hideOverlay();
       video.play().catch(() => {});
@@ -840,12 +858,114 @@ function openSource(i) {
   } catch (e) { onEngineFail(); }
 }
 
-function onEngineFail() {
-  const s = curList[curIdx];
+/* ============================================================
+   وسيط CORS
+   المتصفح يمنع قراءة أي بثّ لا يرسل ترويسة Access-Control-Allow-Origin،
+   وهذه حال أكبر مجموعاتنا (soccerfull.net: 124 مصدرًا من 197 العاملة).
+   الوسيط يجلب الملف من خادم — حيث لا قيد للمتصفح — ثم يمرّره لنا.
+   الترتيب: ما يضبطه المستخدم ← خادم محلي (إن كنّا على localhost) ← وسائط عامة.
+   نبدأ دائمًا بالاتصال المباشر، ولا نلجأ للوسيط إلا بعد فشل فعلي.
+   ============================================================ */
+const PROXY_LS = 'tvhub.proxy';
+const PROXY_QS = '?url=';
+const PUBLIC_PROXIES = [
+  'https://api.allorigins.win/raw' + PROXY_QS,
+  'https://corsproxy.io/' + PROXY_QS,
+  'https://cors.eu.org/',
+];
+
+let proxyBases = null;   // تُبنى عند أول حاجة
+let proxyIdx = -1;       // -1 = اتصال مباشر
+
+function userProxy() {
+  try { return (localStorage.getItem(PROXY_LS) || '').trim(); } catch (e) { return ''; }
+}
+
+function buildProxies() {
+  const out = [];
+  const u = userProxy();
+  if (u) out.push(u);
+  if (/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname)) out.push('/proxy' + PROXY_QS);
+  out.push(...PUBLIC_PROXIES);
+  return out;
+}
+
+/** يحوّل رابط المصدر إلى رابط يمرّ عبر الوسيط الحالي، أو يعيده كما هو. */
+function viaProxy(url) {
+  if (proxyIdx < 0) return url;
+  if (proxyBases === null) proxyBases = buildProxies();
+  let base = proxyBases[proxyIdx];
+  if (!base) return url;
+  if (!base.endsWith('=') && !base.endsWith('/')) base += PROXY_QS;
+  return base + encodeURIComponent(url);
+}
+
+/** ينقلنا للوسيط التالي. يُعيد false إذا استنفدنا الوسائط المتاحة. */
+function nextProxy() {
+  if (proxyBases === null) proxyBases = buildProxies();
+  if (proxyIdx + 1 >= proxyBases.length) return false;
+  proxyIdx++;
+  return true;
+}
+
+/** هل الفشل شبكيًا (قد يصلحه وسيط) أم أن المصدر نفسه ميت؟ */
+function isNetworkFail(why) {
+  if (!why) return true;
+  const d = String(why.details || why.message || why.error || why || '');
+  return /network|manifest|loaderror|cors|fetch|fragment|timeout|abort/i.test(d) || d === '';
+}
+
+/**
+ * ملفات MPD لهذه القنوات تُعلن Widevine وPlayReady فقط، فيختار dash.js
+ * Widevine ويفشل لعدم وجود سيرفر ترخيص. لكن مفتاحنا (KID:KEY) صحيح ويطابق
+ * default_KID حرفيًا. فنعيد كتابة الملف: نحذف الأنظمة الأخرى ونُعلن ClearKey،
+ * ونحقن BaseURL مطلقًا لتبقى روابط المقاطع صحيحة رغم أن القائمة صارت blob.
+ */
+async function rewriteMpdForClearKey(url, ck) {
+  const r = await fetch(viaProxy(url), { cache: 'no-store' });
+  if (!r.ok) throw new Error('mpd http ' + r.status);
+  let xml = await r.text();
+  if (xml.indexOf('<MPD') < 0) throw new Error('not an mpd');
+
+  const CLEARKEY = 'urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e';
+
+  // 1) نحذف إعلانات Widevine وPlayReady (بالشكلين الممكنين)
+  xml = xml.replace(/<ContentProtection[^>]*(edef8ba9|9a04f079)[^>]*>[\s\S]*?<\/ContentProtection>/gi, '');
+  xml = xml.replace(/<ContentProtection[^>]*(edef8ba9|9a04f079)[^>]*\/>/gi, '');
+
+  // 2) نُعلن ClearKey بدلًا منها بجوار إعلان cenc العام
+  if (xml.indexOf(CLEARKEY) < 0) {
+    xml = xml.replace(
+      /(<ContentProtection[^>]*mp4protection:2011[^>]*\/>)/i,
+      '$1<ContentProtection schemeIdUri="' + CLEARKEY + '" value="ClearKey1.0"/>'
+    );
+  }
+
+  // 3) نجعل الروابط النسبية مطلقة — القائمة صارت blob فلا مرجع لها
+  const u = new URL(url);
+  const dir = u.origin + u.pathname.replace(/[^/]*$/, '');
+  xml = xml.replace(/<BaseURL>([^<]+)<\/BaseURL>/gi, (m, val) =>
+    /^https?:/i.test(val) ? m : '<BaseURL>' + new URL(val, dir).href.replace(/&/g, '&amp;') + '</BaseURL>');
+  if (!/<BaseURL/i.test(xml)) {
+    xml = xml.replace(/(<MPD[^>]*>)/i, '$1<BaseURL>' + dir.replace(/&/g, '&amp;') + '</BaseURL>');
+  }
+
+  return URL.createObjectURL(new Blob([xml], { type: 'application/dash+xml' }));
+}
+
+function onEngineFail(why) {
+  // منع CORS ليس موتًا للمصدر — نعيد المحاولة عبر وسيط قبل استنفاده
+  if (isNetworkFail(why) && nextProxy()) {
+    try { stopEngine(); } catch (e) {}
+    setNote('المضيف لا يسمح بالقراءة المباشرة — أعيد المحاولة عبر وسيط…');
+    openSource(curIdx);
+    return;
+  }
   if (tryNextSource()) return;
   const msg = [
     'تعذّر تشغيل المصادر المتاحة.',
     curList.length > 1 ? `جُرّب ${Math.min(curTries, curList.length)} مصدر بديل.` : '',
+    proxyIdx >= 0 ? 'جُرّبت الوسائط أيضًا ولم تنجح.' : '',
     'أسباب شائعة: الرابط ميت، أو المضيف يمنع المتصفح (CORS)، أو القناة تحتاج فكّ DRM غير متاح.',
   ].filter(Boolean).join('\n');
   showOverlay(msg);
@@ -890,11 +1010,11 @@ function toggleFav(key) {
 /* ============================================================
    الفحص الحيّ — GET بمدى صغير، لأن كثيرًا من المضيفات ترفض HEAD
    ============================================================ */
-async function probe(s) {
+async function probeOne(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const r = await fetch(s.link, {
+    const r = await fetch(url, {
       headers: { Range: 'bytes=0-2048' },
       signal: ctrl.signal, redirect: 'follow', mode: 'cors', cache: 'no-store',
     });
@@ -904,11 +1024,32 @@ async function probe(s) {
     const head = new TextDecoder('utf-8').decode(new Uint8Array(buf).slice(0, 80));
     const media = /mpegurl|dash\+xml|octet-stream|video\/|mp2t|mp4/.test(ct) ||
                   head.includes('#EXTM3U') || head.includes('<MPD');
-    return { ok: r.ok && media, st: r.status, at: Date.now(), src: 'device' };
+    return { ok: r.ok && media, st: r.status, ct: ct.slice(0, 40) };
   } catch (e) {
     clearTimeout(t);
-    return { ok: false, st: 0, at: Date.now(), src: 'device' };
+    return { ok: false, st: 0, ct: '' };
   }
+}
+
+/**
+ * يجرّب الاتصال المباشر أولًا، ثم يعيد المحاولة عبر أول وسيط متاح.
+ * بدونه تُحسب كل مضيفات HLS التي تمنع المتصفح (63% من العاملة) ميتة وهي حيّة.
+ * ولا نلجأ للوسيط إن جاء ردّ صريح (403 مثلًا) — فالخادم سيعطي الرد نفسه.
+ */
+async function probe(s) {
+  const direct = await probeOne(s.link);
+  if (direct.ok) return Object.assign(direct, { at: Date.now(), src: 'device' });
+
+  if (direct.st === 0) {
+    if (proxyBases === null) proxyBases = buildProxies();
+    const tries = proxyBases.slice(0, 2);
+    for (const b of tries) {
+      const base = (b.endsWith('=') || b.endsWith('/')) ? b : b + PROXY_QS;
+      const via = await probeOne(base + encodeURIComponent(s.link));
+      if (via.ok) return Object.assign(via, { at: Date.now(), src: 'proxy' });
+    }
+  }
+  return Object.assign(direct, { at: Date.now(), src: 'device' });
 }
 
 async function runPool(items, n, fn) {
@@ -1037,6 +1178,52 @@ function hook() {
   });
 
   $('#btnScan').addEventListener('click', scanCurrent);
+
+  /* ---------- إعدادات الوسيط ---------- */
+  const setBox = $('#settings');
+  if (setBox && $('#btnSettings')) {
+    const setMsg = (t, bad) => {
+      const el = $('#setMsg');
+      if (!el) return;
+      el.textContent = t;
+      el.classList.toggle('bad', !!bad);
+    };
+    const showState = () => {
+      const u = userProxy();
+      if ($('#setProxy')) $('#setProxy').value = u;
+      if ($('#setState')) {
+        $('#setState').textContent = u ? 'مخصّص'
+          : (/^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname) ? 'محلي' : 'عام');
+      }
+    };
+    const resetProxy = () => { proxyBases = null; proxyIdx = -1; };
+
+    $('#btnSettings').addEventListener('click', () => { showState(); setMsg(''); setBox.classList.remove('hidden'); });
+    $('#setClose').addEventListener('click', () => setBox.classList.add('hidden'));
+
+    $('#setClear').addEventListener('click', () => {
+      try { localStorage.removeItem(PROXY_LS); } catch (e) {}
+      resetProxy(); showState(); setMsg('مُسح — سنستخدم الوسائط العامة تلقائيًا.');
+    });
+
+    $('#setSave').addEventListener('click', () => {
+      const v = $('#setProxy').value.trim();
+      try { v ? localStorage.setItem(PROXY_LS, v) : localStorage.removeItem(PROXY_LS); } catch (e) {}
+      resetProxy(); showState(); setMsg('حُفظ — يُستخدم عند فشل الاتصال المباشر.');
+    });
+
+    $('#setTest').addEventListener('click', async () => {
+      const v = $('#setProxy').value.trim();
+      if (!v) return setMsg('اكتب عنوانًا أولًا.', true);
+      const base = (v.endsWith('=') || v.endsWith('/')) ? v : v + PROXY_QS;
+      let target = null;
+      if (S.channel) target = channelStreams(S.channel)[0];
+      else if (S.catalog.channels[0]) target = channelStreams(S.catalog.channels[0])[0];
+      setMsg('جارٍ الاختبار…');
+      const got = await probeOne(base + encodeURIComponent(target ? target.link : 'https://example.com/'));
+      setMsg(got.ok ? 'الوسيط يعمل ✓' : ('لم ينجح — ' + (got.st ? 'الحالة ' + got.st : 'فشل شبكي')), !got.ok);
+    });
+  }
 
   // زرّ الخروج يظهر فقط عندما يكون الموقع مقفلًا
   if ($('#btnLogout')) {
