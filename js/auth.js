@@ -38,6 +38,18 @@ const TVHubAuth = (() => {
   const b2u8 = b64 => Uint8Array.from(
     atob(String(b64).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
 
+  /* الباني (tools/vault-lib.cjs) يخزّن النصّ المشفّر والوسم في حقلين منفصلين
+     (ct و tag)، بينما WebCrypto يتوقّع الوسم **ملحقًا** بالنصّ المشفّر.
+     فدمجهما شرط نجاح الفكّ — بدونه يفشل التحقّق دائمًا وتظهر رسالة
+     «كلمة المرور غير صحيحة» حتى مع كلمة مرور صحيحة. */
+  function ctTag(ctB64, tagB64) {
+    const ct = b2u8(ctB64), tag = b2u8(tagB64);
+    const out = new Uint8Array(ct.length + tag.length);
+    out.set(ct, 0);
+    out.set(tag, ct.length);
+    return out;
+  }
+
   /* ---------- بيانات الحسابات ---------- */
   async function getUsers() {
     if (usersDoc) return usersDoc;
@@ -72,7 +84,7 @@ const TVHubAuth = (() => {
     const key = await subtle().importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
     const gz = new Uint8Array(await subtle().decrypt(
       { name: 'AES-GCM', iv: b2u8(v.iv), additionalData: AAD_VAULT, tagLength: 128 },
-      key, b2u8(v.ct)));
+      key, ctTag(v.ct, v.tag)));
     const text = await new Response(
       new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     return JSON.parse(text);
@@ -92,7 +104,7 @@ const TVHubAuth = (() => {
       const kek = await deriveKek(pass, entry.salt, entry.iter || doc.iter || 300000);
       raw = new Uint8Array(await subtle().decrypt(
         { name: 'AES-GCM', iv: b2u8(entry.iv), additionalData: AAD_USER, tagLength: 128 },
-        kek, b2u8(entry.wk)));
+        kek, ctTag(entry.wk, entry.tag)));
     } catch (_) {
       return { error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
     }
@@ -103,7 +115,7 @@ const TVHubAuth = (() => {
       const lk = await subtle().importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
       label = new TextDecoder().decode(await subtle().decrypt(
         { name: 'AES-GCM', iv: b2u8(entry.lb.iv), additionalData: AAD_LABEL, tagLength: 128 },
-        lk, b2u8(entry.lb.ct)));
+        lk, ctTag(entry.lb.ct, entry.lb.tag)));
     } catch (_) { /* نكتفي باسم الدخول */ }
 
     return { raw, me: { admin: !!entry.admin, label, created: entry.created, id } };
