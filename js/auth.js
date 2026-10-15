@@ -1,171 +1,237 @@
 /* ============================================================
-   بوابة الدخول — TV Hub
-   لا يُحمَّل أي محتوى قبل التحقّق من بيانات الدخول.
-   ملف data/vault.enc مشفّر AES-256-GCM بمفتاح مشتقّ من كلمة المرور
-   عبر PBKDF2-SHA256، فسحب الملف وتجريبه خارج الموقع لا يفيد.
+   بوابة الدخول — TV Hub (نظام الحسابات المتعددة)
 
-   مهم: لا تُخزَّن كلمة المرور في أي مكان. نخزّن فقط المفتاح المشتقّ
-   في sessionStorage مع انتهاء صلاحية، ويُمحى بإغلاق التبويب أو بالخروج.
+   لا يُحمَّل أي محتوى قبل التحقّق. الآلية:
+
+     data/users.json  ملف عام: لكل مستخدم مفتاح رئيسي **مغلَّف**
+                      بكلمة مروره عبر PBKDF2-SHA256 ×300000.
+     data/vault.enc   المحتوى مشفّرًا بالمفتاح الرئيسي (AES-256-GCM).
+
+   فسحب الملفَّين لا يكشف شيئًا: بلا كلمة مرور صحيحة لا يُفتح الغلاف،
+   وبلا المفتاح الرئيسي لا يُقرأ المحتوى.
+
+   لا تُخزَّن كلمة المرور إطلاقًا. المخزَّن هو المفتاح الرئيسي في
+   sessionStorage، ويُمحى بإغلاق التبويب أو بزر الخروج.
+
+   الواجهة المتوقَّعة من app.js:  load() · isLocked() · logout()
    ============================================================ */
 const TVHubAuth = (() => {
+  const USERS = 'data/users.json';
   const VAULT = 'data/vault.enc';
-  const AAD = new TextEncoder().encode('tvhub-vault-v1');
-  const SS = 'tvhub.auth.session.v1';
-  const TTL = 12 * 60 * 60 * 1000;      // 12 ساعة
-  const FAIL_DELAY = 450;               // يبطئ التجريب المتكرّر يدويًا
+  const AAD_USER = new TextEncoder().encode('tvhub-user-v2');
+  const AAD_LABEL = new TextEncoder().encode('tvhub-label-v2');
+  const AAD_VAULT = new TextEncoder().encode('tvhub-vault-v2');
+  const SS = 'tvhub.auth.session.v2';
+  const TTL = 12 * 60 * 60 * 1000;       // 12 ساعة
+  const FAIL_DELAY = 450;                // يبطئ التجريب اليدوي المتكرّر
 
-  let header;                           // undefined = لم يُقرأ · null = لا يوجد قفل
-  let resolver = null;                  // وعد الدخول المعلّق
+  let usersDoc = null;                   // ملف الحسابات العام
+  let me = null;                         // { admin, label, created }
+  let mkRaw = null;                      // المفتاح الرئيسي (بايتات)
+  let locked = null;                     // true/false
+  let LOAD = null;                       // وعد واحد مشترك
+  let release = null;                    // يُحلّ بعد نجاح الدخول
+  let onUnlock = null;                   // إشعار لوحدة الإدارة
 
   const $ = s => document.querySelector(s);
+  const subtle = () => crypto.subtle;
   const b2u8 = b64 => Uint8Array.from(
     atob(String(b64).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-  const u82b = u8 => btoa(String.fromCharCode.apply(null, u8));
 
-  async function getHeader() {
-    if (header !== undefined) return header;
+  /* ---------- بيانات الحسابات ---------- */
+  async function getUsers() {
+    if (usersDoc) return usersDoc;
     try {
-      const r = await fetch(VAULT, { cache: 'no-store' });
-      header = r.ok ? await r.json() : null;
-    } catch (e) { header = null; }
-    return header;
+      const r = await fetch(USERS, { cache: 'no-store' });
+      usersDoc = r.ok ? await r.json() : null;
+    } catch (_) { usersDoc = null; }
+    return usersDoc;
   }
 
-  async function deriveKey(pass, h) {
-    const base = await crypto.subtle.importKey(
+  /* بصمة اسم المستخدم — مطابقة لِما تبنيه tools/vault-lib.cjs */
+  async function userId(user) {
+    const doc = await getUsers();
+    const data = new TextEncoder().encode(doc.pepper + ':' + String(user).trim().toLowerCase());
+    const h = await subtle().digest('SHA-256', data);
+    return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function deriveKek(pass, saltB64, iter) {
+    const base = await subtle().importKey(
       'raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
-    return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt: b2u8(h.salt), iterations: h.iter, hash: 'SHA-256' },
-      base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+    return subtle().deriveKey(
+      { name: 'PBKDF2', salt: b2u8(saltB64), iterations: iter, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
   }
 
-  async function gunzip(bytes) {
-    if (typeof DecompressionStream === 'undefined') throw new Error('old-browser');
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+  /* ---------- فكّ المحتوى ---------- */
+  async function openVault(keyBytes) {
+    const r = await fetch(VAULT, { cache: 'no-store' });
+    if (!r.ok) throw new Error('لا يوجد ملف خزنة');
+    const v = await r.json();
+    const key = await subtle().importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+    const gz = new Uint8Array(await subtle().decrypt(
+      { name: 'AES-GCM', iv: b2u8(v.iv), additionalData: AAD_VAULT, tagLength: 128 },
+      key, b2u8(v.ct)));
+    const text = await new Response(
+      new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return JSON.parse(text);
   }
 
-  async function decryptWith(key, h) {
-    const ct = b2u8(h.ct), tag = b2u8(h.tag);
-    const buf = new Uint8Array(ct.length + tag.length);
-    buf.set(ct, 0); buf.set(tag, ct.length);
-    const plain = new Uint8Array(await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: b2u8(h.iv), additionalData: AAD, tagLength: 128 }, key, buf));
-    const bytes = h.zip === 'gzip' ? await gunzip(plain) : plain;
-    return JSON.parse(new TextDecoder().decode(bytes));
-  }
+  /* ---------- مسار الدخول ---------- */
+  async function tryLogin(user, pass) {
+    const doc = await getUsers();
+    if (!doc || !doc.users || !doc.users.length) return { open: true };
 
-  async function saveSession(key) {
+    const id = await userId(user);
+    const entry = doc.users.find(e => e.u === id);
+    if (!entry) return { error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
+
+    let raw;
     try {
-      const raw = new Uint8Array(await crypto.subtle.exportKey('raw', key));
-      sessionStorage.setItem(SS, JSON.stringify({ k: u82b(raw), e: Date.now() + TTL }));
-    } catch (e) { /* الجلسة راحة إضافية، وفقدانها لا يعطّل شيئًا */ }
+      const kek = await deriveKek(pass, entry.salt, entry.iter || doc.iter || 300000);
+      raw = new Uint8Array(await subtle().decrypt(
+        { name: 'AES-GCM', iv: b2u8(entry.iv), additionalData: AAD_USER, tagLength: 128 },
+        kek, b2u8(entry.wk)));
+    } catch (_) {
+      return { error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
+    }
+
+    // الاسم الظاهر مشفّر بالمفتاح الرئيسي — لا يُعرض قبل إثبات الملكية
+    let label = user;
+    try {
+      const lk = await subtle().importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+      label = new TextDecoder().decode(await subtle().decrypt(
+        { name: 'AES-GCM', iv: b2u8(entry.lb.iv), additionalData: AAD_LABEL, tagLength: 128 },
+        lk, b2u8(entry.lb.ct)));
+    } catch (_) { /* نكتفي باسم الدخول */ }
+
+    return { raw, me: { admin: !!entry.admin, label, created: entry.created, id } };
   }
 
-  async function restore() {
+  /* ---------- الجلسة ---------- */
+  function saveSession() {
+    try {
+      sessionStorage.setItem(SS, JSON.stringify({
+        mk: btoa(String.fromCharCode.apply(null, mkRaw)), me, t: Date.now(),
+      }));
+    } catch (_) { }
+  }
+
+  function restoreSession() {
     try {
       const s = JSON.parse(sessionStorage.getItem(SS) || 'null');
-      if (!s || !s.k || Date.now() > s.e) return null;
-      const h = await getHeader();
-      if (!h) return null;
-      const key = await crypto.subtle.importKey(
-        'raw', b2u8(s.k), { name: 'AES-GCM' }, true, ['decrypt']);
-      return await decryptWith(key, h);
-    } catch (e) {
-      try { sessionStorage.removeItem(SS); } catch (e2) {}
-      return null;
-    }
+      if (!s || !s.t || Date.now() - s.t > TTL) { sessionStorage.removeItem(SS); return null; }
+      return s;
+    } catch (_) { return null; }
   }
 
-  function showErr(msg) { const e = $('#gErr'); if (e) e.textContent = msg || ''; }
-
-  function openGate() {
-    document.body.classList.add('gated');
+  /* ---------- الواجهة ---------- */
+  function showGate(msg) {
     const g = $('#gate');
-    if (g) g.classList.remove('hidden');
-    showErr('');
-    setTimeout(() => { try { $('#gUser').focus(); } catch (e) {} }, 80);
+    if (!g) return;
+    g.classList.remove('hidden');
+    $('#gErr').textContent = msg || '';
   }
+  function hideGate() { const g = $('#gate'); if (g) g.classList.add('hidden'); }
 
-  function closeGate() {
-    const g = $('#gate');
-    if (g) g.classList.add('hidden');
-    document.body.classList.remove('gated');
-  }
+  function wireForm() {
+    const f = $('#gateForm');
+    if (!f || f._wired) return;
+    f._wired = true;
 
-  async function submit(ev) {
-    ev.preventDefault();
-    const btn = $('#gGo');
-    const user = ($('#gUser').value || '').trim();
-    const pass = $('#gPass').value || '';
-    if (!user || !pass) { showErr('أدخل اسم المستخدم وكلمة المرور'); return; }
+    f.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const btn = $('#gGo');
+      btn.disabled = true; btn.textContent = 'جارٍ التحقّق…';
+      $('#gErr').textContent = '';
 
-    btn.disabled = true; btn.textContent = 'جارٍ التحقّق…'; showErr('');
-    const t0 = Date.now();
-    let ok = false;
-    try {
-      const h = await getHeader();
-      if (!h) throw new Error('no-vault');
-      const key = await deriveKey(pass, h);
-      const pl = await decryptWith(key, h);       // فشل الوسم = كلمة مرور خطأ
-      if (String(pl.user || '').trim().toLowerCase() !== user.toLowerCase())
-        throw new Error('mismatch');
-
-      await saveSession(key);
-      ok = true;
-      closeGate();
-      const r = resolver; resolver = null;
-      if (r) r(pl); else location.reload();
-    } catch (e) {
-      const wait = Math.max(0, FAIL_DELAY - (Date.now() - t0));
-      setTimeout(() => {
-        showErr(e && e.message === 'old-browser'
-          ? 'متصفحك لا يدعم فكّ بيانات القفل — استخدم Chrome أو Edge حديثًا.'
-          : 'اسم المستخدم أو كلمة المرور غير صحيحة');
+      const r = await tryLogin($('#gUser').value, $('#gPass').value);
+      if (r.error) {
+        btn.disabled = false; btn.textContent = 'دخول';
+        $('#gErr').textContent = r.error;
         $('#gPass').value = '';
-        try { $('#gPass').focus(); } catch (e2) {}
-      }, wait);
-    } finally {
-      setTimeout(() => { btn.disabled = false; btn.textContent = 'دخول'; }, ok ? 0 : FAIL_DELAY);
-    }
+        await new Promise(s => setTimeout(s, FAIL_DELAY));
+        return;
+      }
+
+      try {
+        const data = await openVault(r.raw);
+        mkRaw = r.raw; me = r.me;
+        saveSession();
+        hideGate();
+        if (onUnlock) onUnlock(data, me);
+        if (release) { const f2 = release; release = null; f2(data); }
+      } catch (_) {
+        btn.disabled = false; btn.textContent = 'دخول';
+        $('#gErr').textContent = 'تعذّر فتح المحتوى — الملف تالف أو غير مكتمل.';
+      }
+    });
   }
 
-  /**
-   * نقطة الدخول الوحيدة لبيانات الموقع.
-   * غير مقفل  → تحميل عادي من ملفات JSON.
-   * مقفل      → جلسة صالحة، وإلا شاشة الدخول وننتظر.
-   */
-  async function load() {
-    const h = await getHeader();
+  /* ---------- نقطة الدخول ---------- */
+  function load() {
+    if (LOAD) return LOAD;
+    LOAD = new Promise(async resolve => {
+      wireForm();
 
-    if (!h) {
-      const j = async p => {
-        const r = await fetch(p, { cache: 'no-store' });
-        if (!r.ok) throw new Error(p + ' → ' + r.status);
-        return r.json();
-      };
-      const pair = await Promise.all([j('data/catalog.json'), j('data/categories.json')]);
-      let verified = null;
-      try { verified = await j('data/verified.json'); } catch (e) { /* اختياري */ }
-      return { catalog: pair[0], categories: pair[1], verified };
-    }
+      // 1) جلسة محفوظة؟
+      const s = restoreSession();
+      if (s) {
+        try {
+          const data = await openVault(b2u8(s.mk));
+          mkRaw = b2u8(s.mk); me = s.me; locked = true;
+          hideGate();
+          if (onUnlock) onUnlock(data, me);
+          return resolve(data);
+        } catch (_) { sessionStorage.removeItem(SS); }
+      }
 
-    const t = await restore();
-    if (t) return t;
+      // 2) هل الموقع مقفل؟
+      const doc = await getUsers();
+      locked = !!(doc && doc.users && doc.users.length);
 
-    const form = $('#gateForm');
-    if (form && !form._wired) { form._wired = 1; form.addEventListener('submit', submit); }
-    return new Promise(res => { resolver = res; openGate(); });
+      if (!locked) {
+        // موقع مفتوح: نعمل كالسابق
+        const g = $('#gate'); if (g) g.classList.add('hidden');
+        try {
+          const cat = await (await fetch('data/catalog.json', { cache: 'no-store' })).json();
+          const cats = await (await fetch('data/categories.json', { cache: 'no-store' })).json();
+          let ver = null;
+          try { ver = await (await fetch('data/verified.json', { cache: 'no-store' })).json(); } catch (_) { }
+          return resolve({ v: 1, catalog: cat, categories: cats, verified: ver });
+        } catch (_) { return resolve({ v: 0, catalog: { channels: [] }, categories: { categories: [] } }); }
+      }
+
+      // 3) مقفل: ننتظر الدخول
+      showGate('');
+      $('#gUser').focus();
+      release = resolve;
+    });
+    return LOAD;
+  }
+
+  async function isLocked() {
+    if (locked !== null) return locked;
+    const doc = await getUsers();
+    locked = !!(doc && doc.users && doc.users.length);
+    return locked;
   }
 
   function logout() {
-    try { sessionStorage.removeItem(SS); } catch (e) {}
+    try { sessionStorage.removeItem(SS); } catch (_) { }
     location.reload();
   }
 
+  /* وحدات أخرى (لوحة الإدارة) تستخدمها لإضافة حسابات */
+  window.TVHubAuthInternals = { userId, deriveKek, b2u8, getUsers, refreshUsers: () => { usersDoc = null; LOAD = null; } };
+  setTimeout(() => { window.dispatchEvent(new Event('tvhub-auth-ready')); }, 0);
+
   return {
-    load,
-    logout,
-    isLocked: async () => !!(await getHeader()),
+    load, isLocked, logout, hideGate,
+    current: () => me,
+    usersDoc: () => usersDoc,
+    masterKeyRaw: () => mkRaw,
+    setUnlockHook: fn => { onUnlock = fn; },
   };
 })();
